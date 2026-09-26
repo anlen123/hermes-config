@@ -15,6 +15,10 @@ sync-hermes-config.py — 把本机 Hermes 的配置/记忆/脚本/技能同步�
   `GIT_SSH_COMMAND='ssh -o PubkeyAuthentication=no'`（禁掉公钥认证），
   它的优先级**高于** core.sshCommand，只能在调用时解除。
 
+* **技能备份可整机退出**：若存在**不备份**控制文件 `<SRC>/.sync-no-skills`（或加 `--no-skills`），
+  本机完全不碰仓库里的 skills/。用于「这台机器不用某类技能、但别处还在用」——
+  否则 stage() 会按本机现状重建 skills/，把别处仍需的技能连带删掉。
+
 未备份（有意为之）: .env / auth.json / sessions / logs / cache / checkpoints / platforms
 """
 import json
@@ -53,6 +57,11 @@ PAN_ACCOUNT = ""                      # 脱敏目标：网盘账号名。从**�
 _mask = os.path.join(SRC, ".sync-mask.txt")
 if os.path.exists(_mask):
     PAN_ACCOUNT = open(_mask, encoding="utf-8").read().strip()
+# 本机不参与技能备份：存在**不备份**控制文件 <SRC>/.sync-no-skills（或加 --no-skills）时，
+# 完全不动仓库里的 skills/。用于「这台机器不用某类技能、但别处还在用」的场景 ——
+# 否则 stage() 会按本机现状重建 skills/，把仓库里别处仍需的技能一起删掉。
+NO_SKILLS_FILE = os.path.join(SRC, ".sync-no-skills")
+NO_SKILLS = os.path.exists(NO_SKILLS_FILE) or "--no-skills" in sys.argv
 PLACEHOLDER = "YOUR_QUARK_ACCOUNT"
 IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", ".DS_Store", "*.lock")
 DRY = "--dry-run" in sys.argv
@@ -108,24 +117,28 @@ def stage():
     # 技能：**只备份用户自建技能**（白名单来自 list-custom-skills.py）。
     # Hermes 镜像自带的 196 个技能（/opt/hermes/skills + /opt/hermes/optional-skills）
     # 不备份 —— 升级/换镜像时自带，放进来只是 12MB 无用噪音。
-    if os.path.exists(f"{DST}/skills"):
-        shutil.rmtree(f"{DST}/skills")
     custom = json.load(open(WHITELIST, encoding="utf-8"))
-    # 父目录已在白名单里的（如 quarkclouddrive 下的子技能）跳过，整目录拷贝即可，避免重复拷贝报错
-    def _covered(rel, others):
-        return any(rel != o and rel.startswith(o.rstrip("/") + "/") for o in others)
-    top = [r for r in custom if not _covered(r, custom)]
-    for rel in top:
-        src = f"{SRC}/skills/{rel}"
-        if not os.path.isdir(src):
-            print(f"⚠️  白名单里的技能已不存在，跳过: {rel}")
-            continue
-        shutil.copytree(src, f"{DST}/skills/{rel}", ignore=_skill_ignore, symlinks=False)
-    _write(f"{DST}/skills/README.md",
-        "# 本目录只收录「用户自建技能」\n\n"
-        "Hermes 镜像自带的技能（含可选库）不在备份范围内，升级或换镜像后自带。\n"
-        f"白名单由 `/opt/data/scripts/list-custom-skills.py` 生成，当前 {len(custom)} 个：\n\n"
-        + "".join(f"- `{c}`\n" for c in custom))
+    if NO_SKILLS:
+        # 本机不参与技能备份：仓库里那份原样保留，绝不清空重建。
+        print(f"ℹ️  本机不参与技能备份（{NO_SKILLS_FILE} 存在），仓库 skills/ 保持原样")
+    else:
+        if os.path.exists(f"{DST}/skills"):
+            shutil.rmtree(f"{DST}/skills")
+        # 父目录已在白名单里的（如 quarkclouddrive 下的子技能）跳过，整目录拷贝即可，避免重复拷贝报错
+        def _covered(rel, others):
+            return any(rel != o and rel.startswith(o.rstrip("/") + "/") for o in others)
+        top = [r for r in custom if not _covered(r, custom)]
+        for rel in top:
+            src = f"{SRC}/skills/{rel}"
+            if not os.path.isdir(src):
+                print(f"⚠️  白名单里的技能已不存在，跳过: {rel}")
+                continue
+            shutil.copytree(src, f"{DST}/skills/{rel}", ignore=_skill_ignore, symlinks=False)
+        _write(f"{DST}/skills/README.md",
+            "# 本目录只收录「用户自建技能」\n\n"
+            "Hermes 镜像自带的技能（含可选库）不在备份范围内，升级或换镜像后自带。\n"
+            f"白名单由 `/opt/data/scripts/list-custom-skills.py` 生成，当前 {len(custom)} 个：\n\n"
+            + "".join(f"- `{c}`\n" for c in custom))
 
     os.makedirs(f"{DST}/memories", exist_ok=True)
     masked = 0
