@@ -157,11 +157,57 @@ env -u GIT_SSH_COMMAND git push origin main
 - 仓库：`git@github.com:anlen123/hermes-config.git`（**公开**，所以内容一律按公开标准脱敏）
 - 聚合目录 `/opt/data/hermes-config/`；同步脚本 `/opt/data/scripts/sync-hermes-config.py`
   （聚合 → 脱敏 → **安全复扫** → 提交 → `env -u GIT_SSH_COMMAND` 推送；带 `--dry-run`）
-- 白名单只收：`config.yaml`、`SOUL.md`、`RESTART-NOTES.txt`、`memories/`、`scripts/`、`skills/`
-- **推送前强制复扫**：拿 `/opt/data/.env` 里的真实凭据值反查聚合目录，命中即中止
-  —— 这条比任何 `.gitignore` 都可靠，因为 git 历史是永久的
+- 白名单只收：`config.yaml`、`SOUL.md`、`RESTART-NOTES.txt`、`memories/`、`scripts/`、
+  **以及用户自建技能（不含镜像自带技能）**
+- **推送前强制复扫**（两道闸门）：① 拿 `/opt/data/.env` 里的真实凭据值反查聚合目录；
+  ② 扫 `"accessToken": "长串"` 这类令牌字段 + 真实账号标识（账号名 / userId / deviceId）。
+  任一命中即中止 —— 这条比任何 `.gitignore` 都可靠，因为 git 历史是永久的
 - 不备份：`.env`、`auth.json`、`sessions/`、`logs/`、`cache/`、`checkpoints/`（约 2.6G）、`platforms/`
-- 记忆里的网盘账号名统一替换为 `YOUR_QUARK_ACCOUNT`
+- 记忆里的网盘账号名统一替换为 `YOUR_QUARK_ACCOUNT`；账号名本身存在**不备份**的
+  `/opt/data/.sync-mask.txt` 里（脚本不再自带明文账号名）
+
+### skills/ 只收「用户自建技能」（2026-09-26 用户明确要求后改正）
+
+初版脚本 `shutil.copytree("/opt/data/skills")` 把**整个技能树**都推上去了：128 个技能 /
+12MB，其中 113 个是 Hermes 镜像自带的（`/opt/hermes/skills` 81 个 + `/opt/hermes/optional-skills`
+115 个，共 196 个名字），既无意义又混进了运行时残留。正确做法：
+
+```bash
+# 生成白名单（判定=技能名不在镜像自带目录里 且 SKILL.md 晚于镜像安装时间）
+/opt/hermes/.venv/bin/python /opt/data/scripts/list-custom-skills.py   # → /opt/data/scripts/custom-skills.json
+```
+
+判定依据两条，缺一不可：
+1. frontmatter 的 `name:` **不出现**在 `/opt/hermes/skills` + `/opt/hermes/optional-skills` 里；
+2. `SKILL.md` 的 mtime 晚于镜像安装时间点。
+
+为什么两条都要：镜像可选库用**技能名**做目录名（`audiocraft-audio-generation`），
+而 `/opt/data/skills` 里是缩写目录名（`audiocraft`），只按目录名比对会把 15 个镜像技能误判成自建；
+反过来只按 mtime 又可能把「上游版本漂移」的技能算进来（同名的本地副本与镜像不同、但里面
+一个字的中文都没有 → 那是版本更新，不是自建）。
+
+### 技能目录里必须排除的运行时残留（踩过一次，真的把 accessToken 推上去了）
+
+`skills/quarkclouddrive/` 内部混着 CLI 自己写的状态：
+`hermes/config.json`（**含 accessToken / refreshToken / deviceId / userId**）、
+`hermes/search/*.jsonl`（搜索历史，含网盘文件名）、`.quarkclouddrive/`、`*.log`。
+拷贝技能时必须用自定义 ignore 过滤（见脚本里的 `_skill_ignore` / `SKIP_DIRS` / `SKIP_FILES`）。
+
+**通用教训**：备份「用户目录」时，目录里往往混着工具自己的凭据缓存；
+白名单只管到目录层级是不够的，必须在目录内部再排一次，且推送前用**内容特征**（令牌字段、
+真实标识值）复扫，而不是只比对已知密钥值。
+
+### 已推错内容如何回滚（不留痕）
+
+```bash
+cd /opt/data/hermes-config
+git checkout --orphan clean && git add -A && git commit -m "..."
+git branch -M clean main
+git reflog expire --expire=now --all && git gc --prune=now -q
+env -u GIT_SSH_COMMAND git push --force origin main
+```
+⚠️ 强推只让旧提交从分支上消失；**GitHub 侧按 commit SHA 仍可能短期可访问**。若误传的是
+凭据，务必**轮换凭据**（如夸克重新登录使旧 token 失效），别只依赖强推。
 
 ## 坑
 - 别把密钥/凭据放 `/root`、`/tmp`、`/opt/hermes`——当下能用，更新即失联。
