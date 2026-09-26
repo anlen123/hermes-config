@@ -24,12 +24,33 @@ import shutil
 import subprocess
 import sys
 
-SRC = "/opt/data"
-DST = "/opt/data/hermes-config"
-WHITELIST = "/opt/data/scripts/custom-skills.json"   # 用户自建技能白名单（由 list-custom-skills.py 生成）
-PAN_ACCOUNT = ""                      # 脱敏目标：网盘账号名。从**不备份**的 /opt/data/.sync-mask.txt 读取，
+# ── 路径自适应（跨机通用）──────────────────────────────────────────────
+# 脚本须位于 <SRC>/hermes-config/scripts/ 下，SRC 由脚本自身位置反推：
+#   NAS(docker):  /opt/data/scripts/…                          → SRC=/opt/data
+#   Windows 本机: %LOCALAPPDATA%\hermes\hermes-config\scripts\… → SRC=…\hermes
+# 可用环境变量 HERMES_SRC 强制覆盖。
+def _detect_src():
+    here = os.path.dirname(os.path.abspath(__file__))      # …/hermes-config/scripts
+    cand = os.path.dirname(os.path.dirname(here))          # …/hermes-config 的父目录
+    for p in (os.environ.get("HERMES_SRC"), cand, "/opt/data",
+              os.path.join(os.environ.get("LOCALAPPDATA", ""), "hermes"),
+              os.path.join(os.path.expanduser("~"), ".hermes")):
+        if p and os.path.exists(os.path.join(p, "config.yaml")):
+            return os.path.normpath(p)
+    raise SystemExit("❌ 找不到 Hermes 主目录（需含 config.yaml），请设 HERMES_SRC")
+
+
+SRC = _detect_src()
+DST = os.path.join(SRC, "hermes-config")
+# 自建技能白名单（由 list-custom-skills.py 生成）：NAS 上在 SRC/scripts，
+# 本机没有 SRC/scripts，则用克隆里那一份。
+WHITELIST = next((p for p in (os.path.join(SRC, "scripts", "custom-skills.json"),
+                              os.path.join(DST, "scripts", "custom-skills.json"))
+                  if os.path.exists(p)),
+                 os.path.join(SRC, "scripts", "custom-skills.json"))
+PAN_ACCOUNT = ""                      # 脱敏目标：网盘账号名。从**不备份**的 <SRC>/.sync-mask.txt 读取，
                                       # 避免脚本自身把真实账号名带进公开仓库
-_mask = f"{SRC}/.sync-mask.txt"
+_mask = os.path.join(SRC, ".sync-mask.txt")
 if os.path.exists(_mask):
     PAN_ACCOUNT = open(_mask, encoding="utf-8").read().strip()
 PLACEHOLDER = "YOUR_QUARK_ACCOUNT"
@@ -49,6 +70,12 @@ def _skill_ignore(dirpath, names):
     return drop | set(SKIP_FILES(dirpath, names))
 
 
+def _write(path, text):
+    """统一按 LF 写（Windows 默认会把 \n 翻成 \r\n，导致每次同步都产生整文件 diff 噪音）。"""
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+
+
 def run(cmd, cwd=None, env=None, check=False):
     r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
     if check and r.returncode != 0:
@@ -64,11 +91,19 @@ def stage():
         if os.path.exists(f"{SRC}/{f}"):
             shutil.copy2(f"{SRC}/{f}", f"{DST}/{f}")
 
-    # 脚本：全部为自建，先清后拷
-    for d in ("scripts",):
-        if os.path.exists(f"{DST}/{d}"):
-            shutil.rmtree(f"{DST}/{d}")
-        shutil.copytree(f"{SRC}/{d}", f"{DST}/{d}", ignore=IGNORE, symlinks=False)
+    # 脚本：全部为自建，先清后拷 —— 但**绝不删**白名单与同步脚本自身。
+    #（本机没有 SRC/scripts，克隆里那份就是唯一副本，照着老逻辑 rmtree 会永久丢失）
+    s_dir, d_dir = os.path.join(SRC, "scripts"), os.path.join(DST, "scripts")
+    if os.path.isdir(s_dir):
+        os.makedirs(d_dir, exist_ok=True)
+        for name in os.listdir(d_dir):
+            if name == "custom-skills.json" or name.startswith("sync-hermes-config"):
+                continue
+            p = os.path.join(d_dir, name)
+            shutil.rmtree(p, ignore_errors=True) if os.path.isdir(p) else os.remove(p)
+        shutil.copytree(s_dir, d_dir, ignore=IGNORE, dirs_exist_ok=True, symlinks=False)
+    else:
+        print(f"ℹ️  本机无 {s_dir}，保留克隆内 scripts/ 原样（白名单与同步脚本不受影响）")
 
     # 技能：**只备份用户自建技能**（白名单来自 list-custom-skills.py）。
     # Hermes 镜像自带的 196 个技能（/opt/hermes/skills + /opt/hermes/optional-skills）
@@ -86,7 +121,7 @@ def stage():
             print(f"⚠️  白名单里的技能已不存在，跳过: {rel}")
             continue
         shutil.copytree(src, f"{DST}/skills/{rel}", ignore=_skill_ignore, symlinks=False)
-    open(f"{DST}/skills/README.md", "w", encoding="utf-8").write(
+    _write(f"{DST}/skills/README.md",
         "# 本目录只收录「用户自建技能」\n\n"
         "Hermes 镜像自带的技能（含可选库）不在备份范围内，升级或换镜像后自带。\n"
         f"白名单由 `/opt/data/scripts/list-custom-skills.py` 生成，当前 {len(custom)} 个：\n\n"
@@ -99,10 +134,14 @@ def stage():
         if not os.path.exists(p):
             continue
         t = open(p, encoding="utf-8").read()
-        masked += t.count(PAN_ACCOUNT)
-        open(f"{DST}/memories/{name}", "w", encoding="utf-8").write(
-            t.replace(PAN_ACCOUNT, PLACEHOLDER))
-    print(f"① 聚合完成（脱敏账号名 {masked} 处；自建技能 {len(custom)} 个，镜像自带技能已排除）")
+        # 守卫：PAN_ACCOUNT 为空串时 str.replace("", X) 会把占位符插进**每个字符之间**，
+        # 直接把记忆文件撑成几十倍垃圾（本机没有 .sync-mask.txt 就会踩到）
+        if PAN_ACCOUNT:
+            masked += t.count(PAN_ACCOUNT)
+            t = t.replace(PAN_ACCOUNT, PLACEHOLDER)
+        _write(f"{DST}/memories/{name}", t)
+    note = f"脱敏账号名 {masked} 处" if PAN_ACCOUNT else f"未配置 {_mask}，无账号名需脱敏"
+    print(f"① 聚合完成（{note}；自建技能 {len(custom)} 个，镜像自带技能已排除）")
 
 
 def gen_env_example():
@@ -117,7 +156,7 @@ def gen_env_example():
     out = ["# Hermes Agent 环境变量清单（只有变量名，值一律不备份）",
            "# 恢复时按需在 /opt/data/.env 里填回真实值", ""]
     out += [f"{k}=" + ("<在此填入真实值>" if cred.search(k) else "") for k in keys]
-    open(f"{DST}/.env.example", "w", encoding="utf-8").write("\n".join(out) + "\n")
+    _write(f"{DST}/.env.example", "\n".join(out) + "\n")
     print(f"② .env.example 已刷新（{len(keys)} 个变量名）")
 
 
@@ -143,7 +182,7 @@ def verify():
                 continue
             for label, pat in pats:
                 if pat.search(t):
-                    hits.append((p.replace(DST + "/", ""), label))
+                    hits.append((os.path.relpath(p, DST), label))
     if hits:
         print("❌ 安全复扫发现真实凭据泄漏，已中止：")
         for p, k in hits:
@@ -173,7 +212,7 @@ def verify():
                 t = open(p, encoding="utf-8", errors="ignore").read()
             except Exception:
                 continue
-            rel = p.replace(DST + "/", "")
+            rel = os.path.relpath(p, DST)
             if token_pat.search(t):
                 leaked.append((rel, "令牌字段"))
                 continue
@@ -194,13 +233,18 @@ def publish():
     run(["git", "add", "-A"], cwd=DST, check=True)
     st = run(["git", "status", "--porcelain"], cwd=DST, env=env)
     if not st.stdout.strip():
-        print("④ 内容无变化，无需提交")
-        return
-    msg = "同步 Hermes 配置备份（脱敏后）"
-    run(["git", "commit", "-q", "-m", msg], cwd=DST, env=env, check=True)
-    print("④ 已提交:", run(["git", "log", "--oneline", "-1"], cwd=DST, env=env).stdout.strip())
+        # 注意：这里**不能 return** —— 上一次若提交成功而推送失败，
+        # 本地就留下了未推送的提交，early-return 会让它永远推不上去。
+        print("④ 内容无变化，跳过提交（下面仍尝试推送）")
+    else:
+        msg = "同步 Hermes 配置备份（脱敏后）"
+        run(["git", "commit", "-q", "-m", msg], cwd=DST, env=env, check=True)
+        print("④ 已提交:", run(["git", "log", "--oneline", "-1"], cwd=DST, env=env).stdout.strip())
     r = run(["git", "push", "origin", "main"], cwd=DST, env=env)
-    print("⑤ 推送:", (r.stdout + r.stderr).strip().splitlines()[-1] if (r.stdout + r.stderr).strip() else "完成")
+    out = (r.stdout + r.stderr).strip()
+    print("⑤ 推送:", out.splitlines()[-1] if out else "完成")
+    if r.returncode != 0:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
