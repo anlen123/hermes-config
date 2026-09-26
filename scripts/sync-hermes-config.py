@@ -86,7 +86,16 @@ def _write(path, text):
 
 
 def run(cmd, cwd=None, env=None, check=False):
-    r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
+    # 必须显式指定 encoding：Windows 上 text=True 会按系统区域编码（中文机器是 GBK）解码，
+    # 而 git 输出是 UTF-8（提交信息含中文）→ reader 线程 UnicodeDecodeError 被静默吞掉，
+    # 结果 stdout 变成 None，下游 .strip() 就炸 AttributeError。
+    try:
+        r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True,
+                           encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        print(f"❌ 找不到命令 {cmd[0]}（本机没装或不在 PATH 里）")
+        sys.exit(1)
+    r.stdout, r.stderr = r.stdout or "", r.stderr or ""
     if check and r.returncode != 0:
         print(f"❌ 命令失败: {' '.join(cmd)}\n{r.stdout}\n{r.stderr}")
         sys.exit(1)
