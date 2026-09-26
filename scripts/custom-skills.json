@@ -1,0 +1,17 @@
+[
+ "devops/container-persistence-and-credentials",
+ "devops/gateway-user-visible-forensics",
+ "devops/hermes-async-job-progress",
+ "devops/hermes-delete-only-approval",
+ "devops/hermes-gateway-behavior-diagnostics",
+ "devops/hermes-gateway-chinese-localization",
+ "devops/hermes-gateway-watchdog-nas",
+ "devops/hermes-session-reset-nas",
+ "quarkclouddrive",
+ "quarkclouddrive/quark-nas-download",
+ "quarkclouddrive/quark-saveas-autoclassify",
+ "quarkclouddrive/quarkclouddrive-nas-env-fix",
+ "quarkclouddrive/xiageba-search",
+ "security/auditing-untrusted-skill-packages",
+ "software-development/upgrade-safe-source-patching"
+]

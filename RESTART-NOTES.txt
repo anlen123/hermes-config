@@ -1,0 +1,19 @@
+=== 重启前状态快照 2026-09-26 00:42:12 ===
+
+[配置] /opt/data/config.yaml
+approvals:
+  mode: delete-only
+  timeout: 60
+command_allowlist:
+command_allowlist:
+- script execution via heredoc
+quick_commands: {}
+personalities: {}
+
+[重启方式] SIGTERM -> PID 1 (网关=容器init，PPid=0)
+[风险] 自重启可能无法拉起，需在 UGREEN Docker 面板手动启动容器
+[备份文件]
+/opt/data/config.yaml.bak-20260925-233224
+/opt/data/config.yaml.bak-20260925-234247
+/opt/data/config.yaml.bak-20260926-003647
+[上次watchdog重启] 22:34:58 后日志中断，未自证恢复

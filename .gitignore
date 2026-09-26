@@ -1,0 +1,23 @@
+# 绝不提交的敏感/大体积内容
+.env
+.env.*
+!.env.example
+auth.json
+auth.lock
+*.bak
+*.bak-*
+backups/
+sessions/
+logs/
+cache/
+tmp/
+checkpoints/
+state/
+home/
+sandboxes/
+__pycache__/
+*.pyc
+*.lock
+.channel_directory.json
+channel_directory.json
+platforms/
