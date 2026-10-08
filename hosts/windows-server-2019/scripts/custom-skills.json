@@ -1,4 +1,15 @@
 [
+ "autonomous-ai-agents/codex-reset-credit-watch",
+ "autonomous-ai-agents/hermes-provider-switching",
+ "cdp-page-inspection",
+ "productivity/bookkeeping-ledger",
+ "productivity/package-tracking",
  "security/auditing-untrusted-skill-packages",
- "software-development/upgrade-safe-source-patching"
+ "software-development/git-history-secret-scrubbing",
+ "software-development/llm-api-throughput-benchmarking",
+ "software-development/nonebot2-plugin-engineering",
+ "software-development/upgrade-safe-source-patching",
+ "software-development/user-facing-string-localization",
+ "web/browserless-web-extraction",
+ "web/cloud-share-download"
 ]

@@ -94,7 +94,9 @@ model:
 
   # API configuration (falls back to OPENROUTER_API_KEY env var)
   # api_key: "your-key-here"  # Uncomment to set here instead of .env
-  base_url: https://api.deepseek.com/v1
+  aliases:
+    gpt6sol: openrouter/openai/gpt-6-sol
+    glm53flash: openrouter/z-ai/glm-5.3-flash
 kanban:
   review_dispatch: true
 
@@ -2011,13 +2013,10 @@ platforms:
 auxiliary:
   vision:
     provider: main
-    model: deepseek-flash
   compression:
     provider: main
-    model: deepseek-flash
   title_generation:
     provider: main
-    model: deepseek-flash
 onboarding:
   seen:
     busy_input_prompt: true
@@ -2043,6 +2042,8 @@ security:
   tirith_fail_open: true
   website_blocklist:
     enabled: false
+  fake_ip_ranges:
+    - 198.18.0.0/15
 smart_model_routing:
   enabled: false
 human_delay:
@@ -2061,3 +2062,4 @@ command_allowlist:
   - script execution via heredoc
   - recursive delete
   - file delete
+provider: deepseek
